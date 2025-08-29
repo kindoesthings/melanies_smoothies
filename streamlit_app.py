@@ -1,38 +1,37 @@
 # Import python packages
 import streamlit as st
-from snowflake.snowpark.functions import col
+from snowflake.snowpark.functions import col  # requires snowflake-snowpark-python
 
-# Write directly to the app
 st.title(f":cup_with_straw: Customize your smoothie :cup_with_straw: {st.__version__}")
 st.write("Choose the fruits you want in your custom Smoothie!")
 
-# Text input for customer name
 name_on_order = st.text_input('Name on Smoothie:')
 st.write("The name on your Smoothie will be", name_on_order)
 
-# Snowflake session
+# Connect using Streamlit connections (reads secrets at [connections.snowflake])
 cnx = st.connection("snowflake")
-session = cnx.session()
-my_dataframe = session.table("smoothies.public.fruit_options").select(col('FRUIT_NAME'))
+session = cnx.session()                      # Snowpark Session
 
-# Multiselect for ingredients
+# Get options -> convert to list
+fruit_sp = session.table("smoothies.public.fruit_options").select(col('FRUIT_NAME'))
+fruit_options = fruit_sp.to_pandas()['FRUIT_NAME'].tolist()   # or [r[0] for r in fruit_sp.collect()]
+
+# Multiselect (limit to 5)
 ingredients_list = st.multiselect(
     'Choose up to 5 ingredients:',
-    my_dataframe, max_selections=5
+    fruit_options,
+    max_selections=5,
+    placeholder="Pick up to 5 fruits…"
 )
+st.caption(f"{len(ingredients_list)}/5 selected")
 
-# Only proceed if ingredients are chosen
 if ingredients_list and name_on_order:
     ingredients_string = ' '.join(ingredients_list)
 
-    # Corrected SQL with both columns
-    my_insert_stmt = f"""
-        insert into smoothies.public.orders(ingredients, name_on_order)
-        values ('{ingredients_string}', '{name_on_order}')
-    """
+    # Safer, parameterized insert
+    session.sql(
+        "insert into smoothies.public.orders(ingredients, name_on_order) values (?, ?)",
+        params=[ingredients_string, name_on_order]
+    ).collect()
 
-    # Button to submit order
-    time_to_insert = st.button('Submit Order')
-    if time_to_insert:
-        session.sql(my_insert_stmt).collect()
-        st.success(f"Your Smoothie is ordered, {name_on_order}!", icon="✅")
+    st.success(f"Your Smoothie is ordered, {name_on_order}!", icon="✅")
