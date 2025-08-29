@@ -26,12 +26,21 @@ st.caption(f"{len(ingredients_list)}/5 selected")
 
 # Only proceed if ingredients are chosen and name present
 if ingredients_list and name_on_order:
+    # Build a single string to match the lab's expected format
     ingredients_string = " ".join(ingredients_list)
 
-    # Parameterized insert (safe)
-    cnx.query(
-        "INSERT INTO SMOOTHIES.PUBLIC.ORDERS(INGREDIENTS, NAME_ON_ORDER) VALUES (%s, %s)",
-        params=(ingredients_string, name_on_order),
-    )
+    # Button to submit order (prevents duplicate inserts on reruns)
+    time_to_insert = st.button("Submit Order")
 
-    st.success(f"Your Smoothie is ordered, {name_on_order}!", icon="✅")
+    if time_to_insert:
+        # Parameterized insert, explicitly setting ORDER_FILLED = FALSE
+        cnx.query(
+            """
+            INSERT INTO SMOOTHIES.PUBLIC.ORDERS
+                (INGREDIENTS, NAME_ON_ORDER, ORDER_FILLED)
+            VALUES (%s, %s, FALSE)
+            """,
+            params=(ingredients_string, name_on_order),
+        )
+
+        st.success(f"Your Smoothie is ordered, {name_on_order}!", icon="✅")
