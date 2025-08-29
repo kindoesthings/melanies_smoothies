@@ -11,7 +11,7 @@ st.write("The name on your Smoothie will be", name_on_order)
 # Connect using Streamlit secrets: [connections.snowflake]
 cnx = st.connection("snowflake")
 
-# Get fruit options via SQL (no Snowpark import needed)
+# Get fruit options via SQL (read path uses .query)
 fruit_df = cnx.query("SELECT FRUIT_NAME FROM SMOOTHIES.PUBLIC.FRUIT_OPTIONS ORDER BY FRUIT_NAME")
 fruit_options = fruit_df["FRUIT_NAME"].tolist()
 
@@ -33,14 +33,17 @@ if ingredients_list and name_on_order:
     time_to_insert = st.button("Submit Order")
 
     if time_to_insert:
+        # Use a Snowpark Session for DML (write path)
+        session = cnx.session()  # requires snowflake-snowpark-python to be installed
+
         # Parameterized insert, explicitly setting ORDER_FILLED = FALSE
-        cnx.query(
+        session.sql(
             """
             INSERT INTO SMOOTHIES.PUBLIC.ORDERS
                 (INGREDIENTS, NAME_ON_ORDER, ORDER_FILLED)
-            VALUES (%s, %s, FALSE)
+            VALUES (?, ?, FALSE)
             """,
-            params=(ingredients_string, name_on_order),
-        )
+            params=[ingredients_string, name_on_order],
+        ).collect()
 
         st.success(f"Your Smoothie is ordered, {name_on_order}!", icon="✅")
