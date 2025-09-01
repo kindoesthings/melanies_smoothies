@@ -1,40 +1,34 @@
 # Import python packages
 import streamlit as st
-import pandas as pd
-import requests
+import pandas as pd          # for .loc/.iloc lookups on a pandas DataFrame
+import requests              # for the nutrition API
 
-# App header
 st.title(f":cup_with_straw: Customize your smoothie :cup_with_straw: {st.__version__}")
 st.write("Choose the fruits you want in your custom Smoothie!")
 
-# Text input for customer name
+# ── Name on Order ───────────────────────────────────────────────────────────────
 name_on_order = st.text_input("Name on Smoothie:")
 st.write("The name on your Smoothie will be", name_on_order)
 
-# Connect using Streamlit secrets: [connections.snowflake]
+# ── Connect to Snowflake ────────────────────────────────────────────────────────
 cnx = st.connection("snowflake")
+session = cnx.session()  # Snowpark Session for reads + INSERT
 
-# ── Read fruit options + SEARCH_ON from Snowflake ───────────────────────────────
-# We build a pandas DataFrame (pd_df) so we can use loc/iloc like in the lab.
-fruit_df = cnx.query(
-    """
-    SELECT
-        FRUIT_NAME,
-        COALESCE(SEARCH_ON, FRUIT_NAME) AS SEARCH_ON
-    FROM SMOOTHIES.PUBLIC.FRUIT_OPTIONS
-    ORDER BY FRUIT_NAME
-    """
+# Read fruit options (Snowpark → pandas) including SEARCH_ON mapping
+my_dataframe = (
+    session.table("SMOOTHIES.PUBLIC.FRUIT_OPTIONS")
+           .select("FRUIT_NAME", "SEARCH_ON")
 )
-pd_df = fruit_df.copy()  # "Make a version of my_dataframe, but call it pd_df"
+pd_df = my_dataframe.to_pandas()
 
-# (Lab debug step — uncomment when asked)
-# st.dataframe(pd_df, use_container_width=True)
-# st.stop()
+# Clean up whitespace just in case
+pd_df["FRUIT_NAME"] = pd_df["FRUIT_NAME"].astype(str).str.strip()
+pd_df["SEARCH_ON"]  = pd_df["SEARCH_ON"].astype(str).str.strip()
 
-# Options shown to the user come from FRUIT_NAME
+# Options shown in the multiselect
 fruit_options = pd_df["FRUIT_NAME"].tolist()
 
-# ── Multiselect with limit ───────────────────────────────────────────────────────
+# ── Pick up to 5 ingredients ───────────────────────────────────────────────────
 ingredients_list = st.multiselect(
     "Choose up to 5 ingredients:",
     fruit_options,
@@ -43,35 +37,18 @@ ingredients_list = st.multiselect(
 )
 st.caption(f"{len(ingredients_list)}/5 selected")
 
-# ── Insert the order when the button is clicked ─────────────────────────────────
-if ingredients_list and name_on_order:
-    ingredients_string = " ".join(ingredients_list)
-    time_to_insert = st.button("Submit Order")
-    if time_to_insert:
-        # Use Snowpark Session for DML
-        session = cnx.session()
-        session.sql(
-            """
-            INSERT INTO SMOOTHIES.PUBLIC.ORDERS
-                (INGREDIENTS, NAME_ON_ORDER, ORDER_FILLED)
-            VALUES (?, ?, FALSE)
-            """,
-            params=[ingredients_string, name_on_order],
-        ).collect()
-        st.success(f"Your Smoothie is ordered, {name_on_order}!", icon="✅")
+# ── Build ingredients string for the order (used later on submit) ──────────────
+ingredients_string = " ".join(ingredients_list) if ingredients_list else ""
 
-# ── Make use of the SEARCH_ON value when calling the API ────────────────────────
-# For each selected fruit, look up the API key via pd_df.loc[...] and call the API.
+# ── Nutrition info for each chosen fruit (uses SEARCH_ON mapping) ──────────────
 for fruit_chosen in ingredients_list:
-    # Get the API search key that corresponds to the UI label
+    # Find API search key for this fruit; fall back to the display name
     match = pd_df.loc[pd_df["FRUIT_NAME"] == fruit_chosen, "SEARCH_ON"]
-    search_on = match.iloc[0] if not match.empty else fruit_chosen  # safe fallback
-
-    # (Optional lab debug line)
-    # st.write("The search value for ", fruit_chosen, " is ", search_on, ".")
+    search_on = match.iloc[0] if not match.empty and pd.notna(match.iloc[0]) else fruit_chosen
 
     st.subheader(f"{fruit_chosen} Nutrition Information")
     try:
+        # SmoothieFroot API
         resp = requests.get(
             f"https://my.smoothiefroot.com/api/fruit/{search_on}",
             timeout=10,
@@ -84,3 +61,23 @@ for fruit_chosen in ingredients_list:
             st.warning(f"{fruit_chosen}: API returned HTTP {resp.status_code}.")
     except requests.RequestException as e:
         st.error(f"Error contacting nutrition API for {fruit_chosen}: {e}")
+
+# ── Submit button BELOW the nutrition tables ───────────────────────────────────
+# Show it only when we have both a name and at least one ingredient.
+if name_on_order and ingredients_list:
+    # Place the button AFTER the tables so it appears at the bottom like the screenshot
+    submit_clicked = st.button("Submit Order")
+
+    if submit_clicked and not st.session_state.get("order_just_submitted"):
+        # Insert into ORDERS and mark as not yet filled
+        session.sql(
+            """
+            INSERT INTO SMOOTHIES.PUBLIC.ORDERS
+                (INGREDIENTS, NAME_ON_ORDER, ORDER_FILLED)
+            VALUES (?, ?, FALSE)
+            """,
+            params=[ingredients_string, name_on_order],
+        ).collect()
+
+        st.session_state["order_just_submitted"] = True  # avoid accidental double-submits
+        st.success(f"Your Smoothie is ordered, {name_on_order}!", icon="✅")
