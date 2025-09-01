@@ -1,7 +1,7 @@
 # Import python packages
 import streamlit as st
-import requests  # NEW: needed for the API calls
-import pandas as pd 
+import requests  # needed for the API calls
+import pandas as pd  # ← NEW: Bring in Pandas
 
 st.title(f":cup_with_straw: Customize your smoothie :cup_with_straw: {st.__version__}")
 st.write("Choose the fruits you want in your custom Smoothie!")
@@ -25,15 +25,10 @@ fruit_df = cnx.query(
     """
 )
 
-# --- Challenge checkpoint: preview the dataframe feeding the multiselect -----
-#st.subheader("Fruit options with SEARCH_ON")
-#st.dataframe(fruit_df[["FRUIT_NAME", "SEARCH_ON"]], use_container_width=True)
-#st.stop()  # ← remove or comment this after you verify the table
-
-#convert
-pd_df=my_dataframe.to_pandas()
-st.dataframe(pd_df)
-st.stop()
+# --- Challenge checkpoint (from previous step) ---------------------------------
+# st.subheader("Fruit options with SEARCH_ON")
+# st.dataframe(fruit_df[["FRUIT_NAME", "SEARCH_ON"]], use_container_width=True)
+# st.stop()  # ← comment/remove to continue with the app
 
 # Defensive trims (helpful if any values have stray spaces)
 fruit_df["FRUIT_NAME"] = fruit_df["FRUIT_NAME"].str.strip()
@@ -51,6 +46,54 @@ ingredients_list = st.multiselect(
     placeholder="Pick up to 5 fruits…",
 )
 st.caption(f"{len(ingredients_list)}/5 selected")
+
+# ── Bring in Pandas: fetch ALL selected fruits, show ONE consolidated table -----
+if ingredients_list:
+    rows = []
+    for fruit_chosen in ingredients_list:
+        api_key = search_lookup.get(fruit_chosen, fruit_chosen)
+        try:
+            resp = requests.get(
+                f"https://my.smoothiefroot.com/api/fruit/{api_key}",
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                payload = resp.json()
+                nutr = payload.get("nutrition", {}) or {}
+                # Build one tidy row per fruit
+                rows.append({
+                    "Fruit": fruit_chosen,                     # friendly display name
+                    "API_Name": payload.get("name"),           # what the API calls it
+                    "Carbs": nutr.get("carbs"),
+                    "Fat": nutr.get("fat"),
+                    "Protein": nutr.get("protein"),
+                    "Sugar": nutr.get("sugar"),
+                    "Family": payload.get("family"),
+                    "Genus": payload.get("genus"),
+                    "Order": payload.get("order"),
+                    "ID": payload.get("id"),
+                })
+            elif resp.status_code == 404:
+                # Keep a row so the user knows which one failed to match
+                rows.append({
+                    "Fruit": fruit_chosen,
+                    "API_Name": None,
+                    "Carbs": None, "Fat": None, "Protein": None, "Sugar": None,
+                    "Family": None, "Genus": None, "Order": None, "ID": None,
+                })
+            else:
+                st.warning(f"{fruit_chosen}: API returned HTTP {resp.status_code}.")
+        except requests.RequestException as e:
+            st.error(f"Error contacting nutrition API for {fruit_chosen}: {e}")
+
+    # Render a single consolidated Pandas DataFrame
+    if rows:
+        df = pd.DataFrame(rows)
+        # Optional: nicer order & index
+        cols = ["Fruit", "API_Name", "Carbs", "Fat", "Protein", "Sugar", "Family", "Genus", "Order", "ID"]
+        df = df[cols].set_index("Fruit")
+        st.subheader("Selected Fruits — Nutrition Snapshot")
+        st.dataframe(df, use_container_width=True)
 
 # ── Insert the order when the button is clicked (preserved) ─────────────────────
 if ingredients_list and name_on_order:
@@ -70,24 +113,3 @@ if ingredients_list and name_on_order:
         ).collect()
 
         st.success(f"Your Smoothie is ordered, {name_on_order}!", icon="✅")
-
-# ── Show nutrition info for each selected fruit (NEW) ───────────────────────────
-# Uses SEARCH_ON so 'Blueberries' → 'Blueberry', etc. 404s are shown as info.
-for fruit_chosen in ingredients_list:
-    api_key = search_lookup.get(fruit_chosen, fruit_chosen)
-    st.subheader(f"{fruit_chosen} Nutrition Information")
-    try:
-        resp = requests.get(
-            f"https://my.smoothiefroot.com/api/fruit/{api_key}",
-            timeout=10,
-        )
-        if resp.status_code == 200:
-            st.dataframe(resp.json(), use_container_width=True)
-        elif resp.status_code == 404:
-            st.info(f"{fruit_chosen}: not found in the API (HTTP 404).")
-        else:
-            st.warning(f"{fruit_chosen}: API returned HTTP {resp.status_code}.")
-    except requests.RequestException as e:
-        st.error(f"Error contacting nutrition API for {fruit_chosen}: {e}")
-
-# (Removed the old single-watermelon test call to the API)
