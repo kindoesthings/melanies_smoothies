@@ -3,53 +3,53 @@ import streamlit as st
 import pandas as pd
 import requests
 
+# App header
 st.title(f":cup_with_straw: Customize your smoothie :cup_with_straw: {st.__version__}")
 st.write("Choose the fruits you want in your custom Smoothie!")
 
-# --- Name input ---------------------------------------------------------------
+# Text input for customer name
 name_on_order = st.text_input("Name on Smoothie:")
 st.write("The name on your Smoothie will be", name_on_order)
 
-# --- Connect to Snowflake -----------------------------------------------------
+# Connect using Streamlit secrets: [connections.snowflake]
 cnx = st.connection("snowflake")
-session = cnx.session()  # write path & Snowpark table access
 
-# --- Pull fruit list (FRUIT_NAME + SEARCH_ON) and make a Pandas DataFrame -----
-my_dataframe = (
-    session.table("SMOOTHIES.PUBLIC.FRUIT_OPTIONS")
-    .select("FRUIT_NAME", "SEARCH_ON")
+# ── Read fruit options + SEARCH_ON from Snowflake ───────────────────────────────
+# We build a pandas DataFrame (pd_df) so we can use loc/iloc like in the lab.
+fruit_df = cnx.query(
+    """
+    SELECT
+        FRUIT_NAME,
+        COALESCE(SEARCH_ON, FRUIT_NAME) AS SEARCH_ON
+    FROM SMOOTHIES.PUBLIC.FRUIT_OPTIONS
+    ORDER BY FRUIT_NAME
+    """
 )
+pd_df = fruit_df.copy()  # "Make a version of my_dataframe, but call it pd_df"
 
-pd_df = my_dataframe.to_pandas()  # convert Snowpark DataFrame -> Pandas
+# (Lab debug step — uncomment when asked)
+# st.dataframe(pd_df, use_container_width=True)
+# st.stop()
 
-# Clean up values and backfill SEARCH_ON when null
-pd_df["FRUIT_NAME"] = pd_df["FRUIT_NAME"].astype(str).str.strip()
-pd_df["SEARCH_ON"]  = (
-    pd_df["SEARCH_ON"].where(pd.notna(pd_df["SEARCH_ON"]), pd_df["FRUIT_NAME"])
-    .astype(str)
-    .str.strip()
-)
+# Options shown to the user come from FRUIT_NAME
+fruit_options = pd_df["FRUIT_NAME"].tolist()
 
-# OPTIONAL: quick debug peek, like in the lab steps
-with st.expander("🔎 Debug: show source dataframe (FRUIT_NAME + SEARCH_ON)"):
-    st.dataframe(pd_df, use_container_width=True)
-    st.caption("Close this expander to continue.")
-
-# --- Multiselect (limit 5) ----------------------------------------------------
+# ── Multiselect with limit ───────────────────────────────────────────────────────
 ingredients_list = st.multiselect(
     "Choose up to 5 ingredients:",
-    pd_df["FRUIT_NAME"].tolist(),
+    fruit_options,
     max_selections=5,
     placeholder="Pick up to 5 fruits…",
 )
 st.caption(f"{len(ingredients_list)}/5 selected")
 
-# --- Insert order when user clicks Submit ------------------------------------
+# ── Insert the order when the button is clicked ─────────────────────────────────
 if ingredients_list and name_on_order:
     ingredients_string = " ".join(ingredients_list)
     time_to_insert = st.button("Submit Order")
-
     if time_to_insert:
+        # Use Snowpark Session for DML
+        session = cnx.session()
         session.sql(
             """
             INSERT INTO SMOOTHIES.PUBLIC.ORDERS
@@ -60,14 +60,15 @@ if ingredients_list and name_on_order:
         ).collect()
         st.success(f"Your Smoothie is ordered, {name_on_order}!", icon="✅")
 
-# --- Nutrition info for each selected fruit (uses the 'strange-looking' loc) --
+# ── Make use of the SEARCH_ON value when calling the API ────────────────────────
+# For each selected fruit, look up the API key via pd_df.loc[...] and call the API.
 for fruit_chosen in ingredients_list:
-    # This is the “strange-looking” line from the lab:
+    # Get the API search key that corresponds to the UI label
     match = pd_df.loc[pd_df["FRUIT_NAME"] == fruit_chosen, "SEARCH_ON"]
     search_on = match.iloc[0] if not match.empty else fruit_chosen  # safe fallback
 
-    # Echo the mapping (as in the screenshot)
-    st.write("The search value for ", fruit_chosen, " is ", search_on, ".")
+    # (Optional lab debug line)
+    # st.write("The search value for ", fruit_chosen, " is ", search_on, ".")
 
     st.subheader(f"{fruit_chosen} Nutrition Information")
     try:
