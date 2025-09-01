@@ -1,6 +1,6 @@
 # Import python packages
 import streamlit as st
-import requests  # ← moved to the top with other imports
+import requests  # already added earlier
 
 st.title(f":cup_with_straw: Customize your smoothie :cup_with_straw: {st.__version__}")
 st.write("Choose the fruits you want in your custom Smoothie!")
@@ -12,9 +12,19 @@ st.write("The name on your Smoothie will be", name_on_order)
 # Connect using Streamlit secrets: [connections.snowflake]
 cnx = st.connection("snowflake")
 
-# Get fruit options via SQL (read path uses .query)
-fruit_df = cnx.query("SELECT FRUIT_NAME FROM SMOOTHIES.PUBLIC.FRUIT_OPTIONS ORDER BY FRUIT_NAME")
+# --- CHANGED: pull both FRUIT_NAME and SEARCH_ON (fallback to FRUIT_NAME when NULL)
+fruit_df = cnx.query("""
+    SELECT
+        FRUIT_NAME,
+        COALESCE(SEARCH_ON, FRUIT_NAME) AS SEARCH_ON
+    FROM SMOOTHIES.PUBLIC.FRUIT_OPTIONS
+    ORDER BY FRUIT_NAME
+""")
+
+# list for the widget (what users see)
 fruit_options = fruit_df["FRUIT_NAME"].tolist()
+# lookup dict: display name -> API key
+search_lookup = dict(zip(fruit_df["FRUIT_NAME"], fruit_df["SEARCH_ON"]))
 
 # Multiselect with limit
 ingredients_list = st.multiselect(
@@ -25,12 +35,14 @@ ingredients_list = st.multiselect(
 )
 st.caption(f"{len(ingredients_list)}/5 selected")
 
-# ── NEW: Use the chosen ingredient in the API call and show a table per fruit
+# Show nutrition panels for each chosen fruit using SEARCH_ON
 if ingredients_list:
     for fruit_chosen in ingredients_list:
+        api_key = search_lookup.get(fruit_chosen, fruit_chosen)  # fallback safety
+        # If your SEARCH_ON is already normalized, no need to change case/spaces here
         resp = requests.get(
-            f"https://my.smoothiefroot.com/api/fruit/{fruit_chosen}",
-            timeout=10,
+            f"https://my.smoothiefroot.com/api/fruit/{api_key}",
+            timeout=10
         )
         if resp.ok:
             st.subheader(f"{fruit_chosen} Nutrition Information")
@@ -40,7 +52,7 @@ if ingredients_list:
 
 # Only proceed if ingredients are chosen and name present
 if ingredients_list and name_on_order:
-    # Build a single string to match the lab's expected format
+    # Build a single string to match the lab's expected format (use display names)
     ingredients_string = " ".join(ingredients_list)
 
     # Button to submit order (prevents duplicate inserts on reruns)
