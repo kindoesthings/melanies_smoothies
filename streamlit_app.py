@@ -47,3 +47,8 @@ if ingredients_list and name_on_order:
         ).collect()
 
         st.success(f"Your Smoothie is ordered, {name_on_order}!", icon="✅")
+
+#new section to display smoothie nutrition information
+import requests
+smoothiefroot_response = requests.get("https://my.smoothiefroot.com/api/fruit/watermelon")
+st.text(smoothiefroot_response)
