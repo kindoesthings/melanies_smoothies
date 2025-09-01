@@ -1,7 +1,8 @@
 # Import python packages
 import streamlit as st
-import requests  # needed for the API calls
-import pandas as pd  # ← NEW: Bring in Pandas
+import requests
+import pandas as pd
+from snowflake.snowpark.functions import col  # NEW: for the Snowpark select()
 
 st.title(f":cup_with_straw: Customize your smoothie :cup_with_straw: {st.__version__}")
 st.write("Choose the fruits you want in your custom Smoothie!")
@@ -13,32 +14,37 @@ st.write("The name on your Smoothie will be", name_on_order)
 # Connect using Streamlit secrets: [connections.snowflake]
 cnx = st.connection("snowflake")
 
-# ── Get fruit options + API search key (SEARCH_ON) ──────────────────────────────
-# (Preserves your list of display names, adds a lookup for API calls)
-fruit_df = cnx.query(
-    """
-    SELECT
-        FRUIT_NAME,
-        COALESCE(SEARCH_ON, FRUIT_NAME) AS SEARCH_ON
-    FROM SMOOTHIES.PUBLIC.FRUIT_OPTIONS
-    ORDER BY FRUIT_NAME
-    """
+# ── Snowpark DF -> Pandas DF for the multiselect (this lesson step) ─────────────
+session = cnx.session()
+
+# 1) Snowpark dataframe with the two needed columns
+my_dataframe = (
+    session.table("SMOOTHIES.PUBLIC.FRUIT_OPTIONS")
+    .select(col("FRUIT_NAME"), col("SEARCH_ON"))
 )
 
-# --- Challenge checkpoint (from previous step) ---------------------------------
-# st.subheader("Fruit options with SEARCH_ON")
-# st.dataframe(fruit_df[["FRUIT_NAME", "SEARCH_ON"]], use_container_width=True)
-# st.stop()  # ← comment/remove to continue with the app
+# (optional peek) show the Snowpark DF
+# st.subheader("Snowpark my_dataframe")
+# st.dataframe(data=my_dataframe, use_container_width=True)
+# st.stop()
 
-# Defensive trims (helpful if any values have stray spaces)
-fruit_df["FRUIT_NAME"] = fruit_df["FRUIT_NAME"].str.strip()
-fruit_df["SEARCH_ON"] = fruit_df["SEARCH_ON"].astype(str).str.strip()
+# 2) Convert to Pandas
+pd_df = my_dataframe.to_pandas()
 
-fruit_options = fruit_df["FRUIT_NAME"].tolist()                 # what users see/choose
-search_lookup = dict(zip(fruit_df["FRUIT_NAME"],                # UI name → API key
-                         fruit_df["SEARCH_ON"]))
+# ✅ Checkpoint for the lab step — leave these two lines ON to verify this part.
+st.subheader("Pandas pd_df (FRUIT_NAME + SEARCH_ON)")
+st.dataframe(pd_df, use_container_width=True)
+st.stop()  # ← comment this out after you’ve confirmed the preview looks right
 
-# Multiselect with limit (unchanged)
+# ── From here on, use pd_df just like your old fruit_df ─────────────────────────
+# Clean up whitespace / types
+pd_df["FRUIT_NAME"] = pd_df["FRUIT_NAME"].astype(str).str.strip()
+pd_df["SEARCH_ON"] = pd_df["SEARCH_ON"].astype(str).str.strip()
+
+fruit_options = pd_df["FRUIT_NAME"].tolist()  # what users see/choose
+search_lookup = dict(zip(pd_df["FRUIT_NAME"], pd_df["SEARCH_ON"]))  # UI → API key
+
+# Multiselect with limit
 ingredients_list = st.multiselect(
     "Choose up to 5 ingredients:",
     fruit_options,
@@ -47,23 +53,19 @@ ingredients_list = st.multiselect(
 )
 st.caption(f"{len(ingredients_list)}/5 selected")
 
-# ── Bring in Pandas: fetch ALL selected fruits, show ONE consolidated table -----
+# ── Consolidated nutrition table (your recent “Bring in Pandas” step) ───────────
 if ingredients_list:
     rows = []
     for fruit_chosen in ingredients_list:
         api_key = search_lookup.get(fruit_chosen, fruit_chosen)
         try:
-            resp = requests.get(
-                f"https://my.smoothiefroot.com/api/fruit/{api_key}",
-                timeout=10,
-            )
+            resp = requests.get(f"https://my.smoothiefroot.com/api/fruit/{api_key}", timeout=10)
             if resp.status_code == 200:
                 payload = resp.json()
                 nutr = payload.get("nutrition", {}) or {}
-                # Build one tidy row per fruit
                 rows.append({
-                    "Fruit": fruit_chosen,                     # friendly display name
-                    "API_Name": payload.get("name"),           # what the API calls it
+                    "Fruit": fruit_chosen,
+                    "API_Name": payload.get("name"),
                     "Carbs": nutr.get("carbs"),
                     "Fat": nutr.get("fat"),
                     "Protein": nutr.get("protein"),
@@ -74,7 +76,6 @@ if ingredients_list:
                     "ID": payload.get("id"),
                 })
             elif resp.status_code == 404:
-                # Keep a row so the user knows which one failed to match
                 rows.append({
                     "Fruit": fruit_chosen,
                     "API_Name": None,
@@ -86,23 +87,18 @@ if ingredients_list:
         except requests.RequestException as e:
             st.error(f"Error contacting nutrition API for {fruit_chosen}: {e}")
 
-    # Render a single consolidated Pandas DataFrame
     if rows:
+        import pandas as pd
         df = pd.DataFrame(rows)
-        # Optional: nicer order & index
         cols = ["Fruit", "API_Name", "Carbs", "Fat", "Protein", "Sugar", "Family", "Genus", "Order", "ID"]
-        df = df[cols].set_index("Fruit")
         st.subheader("Selected Fruits — Nutrition Snapshot")
-        st.dataframe(df, use_container_width=True)
+        st.dataframe(df[cols].set_index("Fruit"), use_container_width=True)
 
-# ── Insert the order when the button is clicked (preserved) ─────────────────────
+# ── Insert the order when the button is clicked (unchanged) ─────────────────────
 if ingredients_list and name_on_order:
     ingredients_string = " ".join(ingredients_list)
-
     time_to_insert = st.button("Submit Order")
     if time_to_insert:
-        # Write path uses Snowpark Session
-        session = cnx.session()
         session.sql(
             """
             INSERT INTO SMOOTHIES.PUBLIC.ORDERS
@@ -111,5 +107,4 @@ if ingredients_list and name_on_order:
             """,
             params=[ingredients_string, name_on_order],
         ).collect()
-
         st.success(f"Your Smoothie is ordered, {name_on_order}!", icon="✅")
