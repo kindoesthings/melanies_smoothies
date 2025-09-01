@@ -1,6 +1,6 @@
 # Import python packages
 import streamlit as st
-import requests 
+import requests  # ← moved to the top with other imports
 
 st.title(f":cup_with_straw: Customize your smoothie :cup_with_straw: {st.__version__}")
 st.write("Choose the fruits you want in your custom Smoothie!")
@@ -25,15 +25,18 @@ ingredients_list = st.multiselect(
 )
 st.caption(f"{len(ingredients_list)}/5 selected")
 
-# ── NEW: preview SmoothieFroot nutrition (watermelon placeholder)
-# For this step of the lab we intentionally fetch "watermelon" for each selected item,
-# so you should see the watermelon row repeated once per chosen ingredient.
+# ── NEW: Use the chosen ingredient in the API call and show a table per fruit
 if ingredients_list:
-    preview_rows = []
     for fruit_chosen in ingredients_list:
-        resp = requests.get("https://my.smoothiefroot.com/api/fruit/watermelon", timeout=10)
-        preview_rows.append(resp.json())
-    st.dataframe(preview_rows, use_container_width=True)
+        resp = requests.get(
+            f"https://my.smoothiefroot.com/api/fruit/{fruit_chosen}",
+            timeout=10,
+        )
+        if resp.ok:
+            st.subheader(f"{fruit_chosen} Nutrition Information")
+            st.dataframe(resp.json(), use_container_width=True)
+        else:
+            st.info(f"{fruit_chosen}: not found in the API (HTTP {resp.status_code}).")
 
 # Only proceed if ingredients are chosen and name present
 if ingredients_list and name_on_order:
