@@ -31,7 +31,7 @@ fruit_df = cnx.query(
 #st.stop()  # ← remove or comment this after you verify the table
 
 #convert
-pd_df = my_dataframe.to_pandas()
+pd_df=my_dataframe.to_pandas()
 st.dataframe(pd_df)
 st.stop()
 
