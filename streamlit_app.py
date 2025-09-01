@@ -24,6 +24,11 @@ fruit_df = cnx.query(
     """
 )
 
+# --- Challenge checkpoint: preview the dataframe feeding the multiselect -----
+st.subheader("Fruit options with SEARCH_ON")
+st.dataframe(fruit_df[["FRUIT_NAME", "SEARCH_ON"]], use_container_width=True)
+st.stop()  # ← remove or comment this after you verify the table
+
 # Defensive trims (helpful if any values have stray spaces)
 fruit_df["FRUIT_NAME"] = fruit_df["FRUIT_NAME"].str.strip()
 fruit_df["SEARCH_ON"] = fruit_df["SEARCH_ON"].astype(str).str.strip()
