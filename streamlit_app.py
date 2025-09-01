@@ -1,6 +1,7 @@
 # Import python packages
 import streamlit as st
 import requests  # NEW: needed for the API calls
+import pandas as pd 
 
 st.title(f":cup_with_straw: Customize your smoothie :cup_with_straw: {st.__version__}")
 st.write("Choose the fruits you want in your custom Smoothie!")
@@ -25,9 +26,14 @@ fruit_df = cnx.query(
 )
 
 # --- Challenge checkpoint: preview the dataframe feeding the multiselect -----
-st.subheader("Fruit options with SEARCH_ON")
-st.dataframe(fruit_df[["FRUIT_NAME", "SEARCH_ON"]], use_container_width=True)
-st.stop()  # ← remove or comment this after you verify the table
+#st.subheader("Fruit options with SEARCH_ON")
+#st.dataframe(fruit_df[["FRUIT_NAME", "SEARCH_ON"]], use_container_width=True)
+#st.stop()  # ← remove or comment this after you verify the table
+
+#convert
+pd_df = my_dataframe.to_pandas()
+st.dataframe(pd_df)
+st.stop()
 
 # Defensive trims (helpful if any values have stray spaces)
 fruit_df["FRUIT_NAME"] = fruit_df["FRUIT_NAME"].str.strip()
